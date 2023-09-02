@@ -48,8 +48,8 @@ __global__ void im2col(Tensor<T>* out,Tensor<T>* src,int kh,int kw,int sh,int sw
         T* col = out->data + (channel_out * height_col + h_out) * width_col + w_out;
         const T* im = src->data + (channel_in * H + h_in) * W + w_in;
         for (int i = 0;i<kw;i++) {
+            int h = h_in + i * dh;
             for (int j = 0;j < kw;j++) {
-                int h = h_in + i * dh;
                 int w = w_in + j * dw;
                 if (h >= 0 && w >= 0 && h < H && w < W) {
                     *col = im[i * dh * W + j * dw];
