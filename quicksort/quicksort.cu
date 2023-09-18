@@ -84,7 +84,6 @@ __global__ void quick_sort(float *data, int left, int right, int depth) {
     // 设置非阻塞流
     cudaStreamCreateWithFlags(&l_stream, cudaStreamNonBlocking);
     quick_sort<<<1, 1, 0, l_stream>>>(data, left, n_right, depth + 1);
-    cudaStreamDestroy(l_stream);
   }
 
   if ((left_ptr - data) < right) {
@@ -92,7 +91,6 @@ __global__ void quick_sort(float *data, int left, int right, int depth) {
     // 设置非阻塞流
     cudaStreamCreateWithFlags(&r_stream, cudaStreamNonBlocking);
     quick_sort<<<1, 1, 0, r_stream>>>(data, n_left, right, depth + 1);
-    cudaStreamDestroy(r_stream);
   }
 }
 
@@ -125,7 +123,7 @@ int main() {
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
   cudaEventRecord(start);
-  thrust::sort( t_data, t_data + N);
+  // thrust::sort( t_data, t_data + N);
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   cudaEventElapsedTime(&milliseconds, start, stop);
