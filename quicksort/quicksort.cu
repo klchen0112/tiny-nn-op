@@ -1,6 +1,13 @@
 #include <algorithm>
+
+
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
+
+#include <thrust/sort.h>
+#include <thrust/functional.h>
+#include <thrust/execution_policy.h>
+#include <thrust/device_ptr.h>
 
 #define DEBUG
 #ifdef DEBUG
@@ -17,6 +24,7 @@ constexpr int MAX_DEPTH = 16;
 constexpr int INSERTION_SORT = 32;
 
 __device__ void selection_sort(float *data, int left, int right) {
+  // printf("selection sort from %d to %d\n",left,right);
   for (int i = left; i < right; i++) {
     float min_val = data[i];
     int min_idx = i;
@@ -38,6 +46,7 @@ __global__ void quick_sort(float *data, int left, int right, int depth) {
     selection_sort(data, left, right);
     return;
   }
+  // printf("DEPTH %d\n",depth);
 
   float *left_ptr = data + left;
   float *right_ptr = data + right;
@@ -59,7 +68,7 @@ __global__ void quick_sort(float *data, int left, int right, int depth) {
       right_val = *right_ptr;
     }
 
-    if (left_ptr < right_ptr) {
+    if (left_ptr <= right_ptr) {
       *left_ptr = right_val;
       left_ptr++;
       *right_ptr = left_val;
@@ -89,29 +98,45 @@ __global__ void quick_sort(float *data, int left, int right, int depth) {
 
 void run_qsort(float *data, int nitems) {
   // Prepare CDP for the max depth 'MAX_DEPTH'.
-  GPU_CHECK(cudaDeviceSetLimit(cudaLimitDevRuntimeSyncDepth, MAX_DEPTH));
-
+  checkCudaErrors(cudaDeviceSetLimit(cudaLimitDevRuntimeSyncDepth, MAX_DEPTH));
+  printf("run own qsort\n");
   int left = 0;
   int right = nitems - 1;
   quick_sort<<<1, 1>>>(data, left, right, 0);
-  GPU_CHECK(cudaDeviceSynchronize());
+  checkCudaErrors(cudaDeviceSynchronize());
 }
 
 int main() {
   float milliseconds;
-  const int N = 1e7;
+  const int N = 5e4;
 
   float *c_data = (float *)malloc(N * sizeof(float));
+  std::generate(c_data, c_data + N, rand);
 
-  float *g_data;
+
+  float *g_data = nullptr;
 
   checkCudaErrors(cudaMalloc(&g_data, N * sizeof(float)));
   checkCudaErrors(
-      cudaMemcpy(c_data, g_data, N * sizeof(float), cudaMemcpyHostToDevice));
+      cudaMemcpy(g_data, c_data, N * sizeof(float), cudaMemcpyHostToDevice));
 
-  sort(c_data, c_data + N);
-
+  thrust::device_ptr<float> t_data(g_data);
   cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start);
+  thrust::sort( t_data, t_data + N);
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  float *t_result = (float *)malloc(N * sizeof(float));
+  checkCudaErrors(
+      cudaMemcpy(t_result, g_data, N * sizeof(float), cudaMemcpyDeviceToHost));
+  printf("thrust sort latency = %f ms\n", milliseconds);
+
+  checkCudaErrors(
+      cudaMemcpy(g_data, c_data, N * sizeof(float), cudaMemcpyHostToDevice));
+
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
   cudaEventRecord(start);
@@ -120,22 +145,22 @@ int main() {
   cudaEventSynchronize(stop);
   cudaEventElapsedTime(&milliseconds, start, stop);
 
-  printf("reduce_v0 latency = %f ms\n", milliseconds);
+  printf("own sort latency = %f ms\n", milliseconds);
+
 
   float *g_result = (float *)malloc(N * sizeof(float));
   checkCudaErrors(
-      cudaMemcpy(g_data, g_result, N * sizeof(float), cudaMemcpyDeviceToHost));
+      cudaMemcpy(g_result, g_data, N * sizeof(float), cudaMemcpyDeviceToHost));
 
   for (int i = 0; i < N; i++) {
-    if (g_result[i] != c_data[i]) {
+    if (g_result[i] != t_result[i]) {
       printf("%d-th error", i);
       return 0;
     }
   }
 
-  printf("WarpSoftmax latency = %f ms\n", milliseconds);
   checkCudaErrors(cudaFree(g_data));
-  free(g_data);
+  free(c_data);
   free(g_result);
   return 0;
 }
